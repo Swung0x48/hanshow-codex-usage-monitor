@@ -18,6 +18,8 @@
 
 ## 依赖安装
 
+使用本项目之前，蓝牙电子价签需要先刷入 [`ihopenot/ihopebleepd`](https://github.com/ihopenot/ihopebleepd.git) 固件。该固件提供项目所需的 BLE UART 服务和电子纸写入协议。
+
 ```powershell
 python -m pip install pillow bleak
 ```

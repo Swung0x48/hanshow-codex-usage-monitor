@@ -19,6 +19,8 @@ The generated screen is 212x104 pixels:
 
 ## Requirements
 
+Before using this project, the BLE e-paper tag must be flashed with the [`ihopenot/ihopebleepd`](https://github.com/ihopenot/ihopebleepd.git) firmware. That firmware provides the BLE UART service and e-paper write protocol used here.
+
 Python:
 
 ```powershell
