@@ -1,0 +1,1139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>image.bin 调试器</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #667085;
+      --line: #d8dee9;
+      --active: #1b6b68;
+      --active-soft: #dff2ef;
+      --black: #101828;
+      --red: #d92d20;
+      --white: #ffffff;
+      --warn: #b54708;
+      --ok: #067647;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.45;
+      overflow: hidden;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    .app {
+      height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      overflow: hidden;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 650;
+    }
+
+    .file-picker {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .file-picker input {
+      max-width: 340px;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(420px, 1fr) minmax(360px, 520px);
+      gap: 16px;
+      padding: 16px;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    section {
+      min-height: 0;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      gap: 12px;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .toolbar,
+    .summary,
+    .inspector {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 10px;
+    }
+
+    .toolbar button {
+      min-width: 36px;
+      height: 32px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    .toolbar button:disabled {
+      cursor: not-allowed;
+      color: #98a2b3;
+      background: #f2f4f7;
+    }
+
+    .toolbar button.primary {
+      min-width: 70px;
+      color: #fff;
+      border-color: var(--active);
+      background: var(--active);
+    }
+
+    .toolbar button.ble {
+      min-width: 88px;
+    }
+
+    .toolbar-separator {
+      width: 1px;
+      height: 28px;
+      background: var(--line);
+    }
+
+    .ble-status {
+      min-width: 190px;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .ble-status.connected {
+      color: var(--ok);
+      font-weight: 600;
+    }
+
+    .ble-status.error {
+      color: var(--warn);
+      font-weight: 600;
+    }
+
+    .toolbar input[type="range"] {
+      flex: 1 1 240px;
+      min-width: 160px;
+    }
+
+    .step-counter {
+      min-width: 96px;
+      color: var(--muted);
+      text-align: right;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 0;
+      overflow: hidden;
+    }
+
+    .metric {
+      padding: 12px;
+      border-right: 1px solid var(--line);
+    }
+
+    .metric:last-child {
+      border-right: 0;
+    }
+
+    .metric .label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .metric .value {
+      margin-top: 3px;
+      font-size: 18px;
+      font-weight: 650;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .preview-wrap {
+      display: grid;
+      grid-template-columns: minmax(280px, 636px) minmax(180px, 1fr);
+      gap: 12px;
+      min-height: 0;
+    }
+
+    .screen-box,
+    .detail-box {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      min-height: 0;
+    }
+
+    .screen-box {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      padding: 12px;
+      gap: 10px;
+    }
+
+    .screen-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .screen-title strong {
+      font-size: 15px;
+    }
+
+    .legend {
+      display: flex;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .swatch {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .swatch::before {
+      content: "";
+      width: 12px;
+      height: 12px;
+      border: 1px solid var(--line);
+      border-radius: 2px;
+      background: var(--swatch);
+    }
+
+    .canvas-shell {
+      align-self: start;
+      overflow: auto;
+      border: 1px solid var(--line);
+      background: #e4e7ec;
+      max-width: 100%;
+    }
+
+    canvas {
+      display: block;
+      width: min(100%, 636px);
+      height: auto;
+      aspect-ratio: 212 / 104;
+      image-rendering: pixelated;
+      background: #fff;
+    }
+
+    .detail-box {
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      padding: 12px;
+      gap: 10px;
+    }
+
+    .detail-title {
+      font-weight: 650;
+      min-height: 22px;
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 96px 1fr;
+      gap: 6px 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .kv span:nth-child(2n) {
+      color: var(--text);
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .hex {
+      margin: 0;
+      min-height: 160px;
+      overflow: auto;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #0f172a;
+      color: #d1e7ff;
+      font-family: Consolas, "Cascadia Mono", monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .timeline-panel {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      min-height: 0;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .timeline-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .timeline-head strong {
+      font-size: 15px;
+    }
+
+    .timeline {
+      min-height: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 8px;
+    }
+
+    .step {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 36px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 9px 10px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--text);
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .step:hover {
+      background: #f2f4f7;
+    }
+
+    .step.active {
+      border-color: var(--active);
+      background: var(--active-soft);
+    }
+
+    .step-index {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .step-title {
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .step-sub {
+      color: var(--muted);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .badge {
+      min-width: 44px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #3538cd;
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .badge.red {
+      background: #ffebe7;
+      color: var(--red);
+    }
+
+    .badge.bw {
+      background: #f2f4f7;
+      color: var(--black);
+    }
+
+    .empty {
+      display: grid;
+      place-items: center;
+      min-height: 220px;
+      color: var(--muted);
+      text-align: center;
+      padding: 24px;
+    }
+
+    .error {
+      color: var(--warn);
+      font-weight: 600;
+    }
+
+    @media (max-width: 980px) {
+      main,
+      .preview-wrap {
+        grid-template-columns: 1fr;
+      }
+
+      .summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .metric {
+        border-bottom: 1px solid var(--line);
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+    <header>
+      <h1>image.bin 调试器</h1>
+      <label class="file-picker">
+        <span>打开</span>
+        <input id="fileInput" type="file" accept=".bin,application/octet-stream">
+      </label>
+    </header>
+
+    <main>
+      <section class="workspace">
+        <div class="toolbar">
+          <button id="firstBtn" title="第一步">|&lt;</button>
+          <button id="prevBtn" title="上一步">&lt;</button>
+          <button id="playBtn" class="primary" title="播放">播放</button>
+          <button id="nextBtn" title="下一步">&gt;</button>
+          <button id="lastBtn" title="最后一步">&gt;|</button>
+          <input id="stepRange" type="range" min="0" max="0" value="0">
+          <span id="stepCounter" class="step-counter">0 / 0</span>
+          <span class="toolbar-separator"></span>
+          <button id="connectBleBtn" class="ble" title="请求蓝牙权限并搜索设备">连接设备</button>
+          <button id="uploadBleBtn" class="ble primary" title="把当前 image.bin 写入设备">写入设备</button>
+          <span id="bleStatus" class="ble-status">蓝牙未连接</span>
+        </div>
+
+        <div id="summary" class="summary">
+          <div class="metric">
+            <div class="label">格式</div>
+            <div id="formatValue" class="value">-</div>
+          </div>
+          <div class="metric">
+            <div class="label">模式</div>
+            <div id="modeValue" class="value">-</div>
+          </div>
+          <div class="metric">
+            <div class="label">包数</div>
+            <div id="packetValue" class="value">-</div>
+          </div>
+          <div class="metric">
+            <div class="label">黑白</div>
+            <div id="bwValue" class="value">-</div>
+          </div>
+          <div class="metric">
+            <div class="label">红色</div>
+            <div id="redValue" class="value">-</div>
+          </div>
+        </div>
+
+        <div class="preview-wrap">
+          <div class="screen-box">
+            <div class="screen-title">
+              <strong>屏幕预览</strong>
+              <div class="legend">
+                <span class="swatch" style="--swatch:#fff">白</span>
+                <span class="swatch" style="--swatch:#111">黑</span>
+                <span class="swatch" style="--swatch:#d92d20">红</span>
+              </div>
+            </div>
+            <div class="canvas-shell">
+              <canvas id="preview" width="212" height="104"></canvas>
+            </div>
+          </div>
+
+          <div class="detail-box">
+            <div id="detailTitle" class="detail-title">等待打开 image.bin</div>
+            <div class="kv">
+              <span>偏移</span><span id="offsetValue">-</span>
+              <span>长度</span><span id="lengthValue">-</span>
+              <span>命令</span><span id="commandValue">-</span>
+              <span>进度</span><span id="progressValue">-</span>
+            </div>
+            <pre id="hexValue" class="hex"></pre>
+          </div>
+        </div>
+      </section>
+
+      <section class="timeline-panel">
+        <div class="timeline-head">
+          <strong>时间线</strong>
+          <span id="statusText">未加载</span>
+        </div>
+        <div id="timeline" class="timeline">
+          <div class="empty">选择一个 image.bin 文件</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const WIDTH = 212;
+    const HEIGHT = 104;
+    const IMAGE_BYTES = (WIDTH * HEIGHT) / 8;
+    const CHUNK_BYTES = 200;
+    const BLE_DEVICE_NAMES = ["Ihopeseral_uarttrans", "SPP BLE Server", "Octppus_uarttrans"];
+    const BLE_SERVICE_UUID = "f000fff0-0451-4000-b000-000000000000";
+    const BLE_CHARACTERISTIC_UUID = "f000fff1-0451-4000-b000-000000000000";
+    const BLE_ACK_TIMEOUT_MS = 10000;
+
+    const state = {
+      fileBytes: new Uint8Array(),
+      steps: [],
+      format: "-",
+      mode: "-",
+      current: -1,
+      timer: null,
+      bleDevice: null,
+      bleServer: null,
+      bleCharacteristic: null,
+      bleBusy: false,
+    };
+
+    const els = {
+      fileInput: document.getElementById("fileInput"),
+      firstBtn: document.getElementById("firstBtn"),
+      prevBtn: document.getElementById("prevBtn"),
+      playBtn: document.getElementById("playBtn"),
+      nextBtn: document.getElementById("nextBtn"),
+      lastBtn: document.getElementById("lastBtn"),
+      connectBleBtn: document.getElementById("connectBleBtn"),
+      uploadBleBtn: document.getElementById("uploadBleBtn"),
+      bleStatus: document.getElementById("bleStatus"),
+      stepRange: document.getElementById("stepRange"),
+      stepCounter: document.getElementById("stepCounter"),
+      formatValue: document.getElementById("formatValue"),
+      modeValue: document.getElementById("modeValue"),
+      packetValue: document.getElementById("packetValue"),
+      bwValue: document.getElementById("bwValue"),
+      redValue: document.getElementById("redValue"),
+      detailTitle: document.getElementById("detailTitle"),
+      offsetValue: document.getElementById("offsetValue"),
+      lengthValue: document.getElementById("lengthValue"),
+      commandValue: document.getElementById("commandValue"),
+      progressValue: document.getElementById("progressValue"),
+      hexValue: document.getElementById("hexValue"),
+      timeline: document.getElementById("timeline"),
+      statusText: document.getElementById("statusText"),
+      preview: document.getElementById("preview"),
+    };
+
+    const ctx = els.preview.getContext("2d");
+
+    function hex2(n) {
+      return n.toString(16).padStart(2, "0");
+    }
+
+    function hexDump(bytes, limit) {
+      const shown = bytes.slice(0, limit);
+      let out = "";
+      for (let i = 0; i < shown.length; i += 16) {
+        const row = shown.slice(i, i + 16);
+        out += i.toString(16).padStart(4, "0") + "  ";
+        out += Array.from(row, hex2).join(" ");
+        out += "\n";
+      }
+      if (bytes.length > limit) {
+        out += `... ${bytes.length - limit} bytes more`;
+      }
+      return out.trim();
+    }
+
+    function setBleStatus(text, kind) {
+      els.bleStatus.textContent = text;
+      els.bleStatus.className = "ble-status";
+      if (kind) {
+        els.bleStatus.classList.add(kind);
+      }
+    }
+
+    function packetCommand(packet) {
+      if (packet.length === 2 && packet[0] === 0x01) return `01${hex2(packet[1])}`;
+      if (packet.length === 2 && packet[0] === 0x00) return `00${hex2(packet[1])}`;
+      return hex2(packet[0]);
+    }
+
+    function tryReadRecords(bytes) {
+      const packets = [];
+      let cursor = 0;
+      while (cursor + 2 <= bytes.length) {
+        const len = bytes[cursor] | (bytes[cursor + 1] << 8);
+        if (len < 1 || len > 512 || cursor + 2 + len > bytes.length) {
+          return null;
+        }
+        packets.push({
+          offset: cursor + 2,
+          recordOffset: cursor,
+          bytes: bytes.slice(cursor + 2, cursor + 2 + len),
+        });
+        cursor += 2 + len;
+      }
+      if (cursor !== bytes.length || packets.length === 0) {
+        return null;
+      }
+      if (!isKnownPacketStart(packets[0].bytes)) {
+        return null;
+      }
+      return packets;
+    }
+
+    function isKnownPacketStart(packet) {
+      return packet.length > 0 && [0x00, 0x01, 0x02, 0x03, 0x04, 0x05].includes(packet[0]);
+    }
+
+    function readRawPackets(bytes) {
+      const packets = [];
+      let cursor = 0;
+      let activePlane = "";
+      let remaining = 0;
+
+      while (cursor < bytes.length) {
+        const cmd = bytes[cursor];
+        let len = 1;
+
+        if (cmd === 0x00 || cmd === 0x01) {
+          len = 2;
+        } else if (cmd === 0x04 || cmd === 0x05 || cmd === 0x03) {
+          len = 1;
+        } else if (cmd === 0x02) {
+          if (!activePlane || remaining <= 0) {
+            throw new Error(`offset ${cursor}: data packet without active image plane`);
+          }
+          len = 1 + Math.min(CHUNK_BYTES, remaining);
+        } else {
+          throw new Error(`offset ${cursor}: unknown command 0x${hex2(cmd)}`);
+        }
+
+        if (cursor + len > bytes.length) {
+          throw new Error(`offset ${cursor}: truncated packet`);
+        }
+
+        const packet = bytes.slice(cursor, cursor + len);
+        packets.push({ offset: cursor, bytes: packet });
+
+        if (cmd === 0x04) {
+          activePlane = "bw";
+          remaining = IMAGE_BYTES;
+        } else if (cmd === 0x05) {
+          activePlane = "red";
+          remaining = IMAGE_BYTES;
+        } else if (cmd === 0x02) {
+          remaining -= len - 1;
+          if (remaining === 0) {
+            activePlane = "";
+          }
+        }
+
+        cursor += len;
+      }
+      return packets;
+    }
+
+    function parsePackets(packets) {
+      const steps = [];
+      const planeCounts = { bw: 0, red: 0 };
+      let mode = "BW";
+      let activePlane = "";
+      let planeOffset = 0;
+
+      packets.forEach((packetInfo) => {
+        const packet = packetInfo.bytes;
+        const cmd = packet[0];
+        const step = {
+          offset: packetInfo.offset,
+          length: packet.length,
+          packet,
+          command: packetCommand(packet),
+          type: "cmd",
+          title: "",
+          sub: "",
+          plane: "",
+          payloadOffset: null,
+          payloadLength: 0,
+          badge: "CMD",
+        };
+
+        if (cmd === 0x01 && packet.length === 2) {
+          step.type = "clear";
+          step.title = packet[1] === 0xff ? "清屏全白" : `清屏 0x${hex2(packet[1])}`;
+          step.sub = "EPD_CMD_CLEAR";
+        } else if (cmd === 0x00 && packet.length === 2) {
+          mode = packet[1] === 0x02 ? "BWR" : "BW";
+          step.type = "init";
+          step.title = packet[1] === 0x02 ? "初始化黑白红模式" : "初始化黑白模式";
+          step.sub = "EPD_CMD_INIT";
+        } else if (cmd === 0x04) {
+          activePlane = "bw";
+          planeOffset = 0;
+          step.type = "prepare";
+          step.plane = "bw";
+          step.title = "准备黑白 RAM";
+          step.sub = "EPD_CMD_PREPARE_BLK";
+          step.badge = "BW";
+        } else if (cmd === 0x05) {
+          activePlane = "red";
+          planeOffset = 0;
+          step.type = "prepare";
+          step.plane = "red";
+          step.title = "准备红色 RAM";
+          step.sub = "EPD_CMD_PREPARE_RED";
+          step.badge = "RED";
+        } else if (cmd === 0x02) {
+          if (!activePlane) {
+            throw new Error(`offset ${packetInfo.offset}: data packet without prepare command`);
+          }
+          const payloadLength = packet.length - 1;
+          planeCounts[activePlane] += 1;
+          step.type = "data";
+          step.plane = activePlane;
+          step.payloadOffset = planeOffset;
+          step.payloadLength = payloadLength;
+          step.packetNumber = planeCounts[activePlane];
+          step.title = activePlane === "red"
+            ? `发送红色第 ${step.packetNumber} 包`
+            : `发送黑白第 ${step.packetNumber} 包`;
+          step.sub = `平面偏移 ${planeOffset}, ${payloadLength} bytes`;
+          step.badge = activePlane === "red" ? "RED" : "BW";
+          planeOffset += payloadLength;
+          if (planeOffset >= IMAGE_BYTES) {
+            activePlane = "";
+          }
+        } else if (cmd === 0x03) {
+          step.type = "update";
+          step.title = "刷新显示";
+          step.sub = "EPD_CMD_UPDATE";
+        } else {
+          step.title = `未知命令 0x${hex2(cmd)}`;
+          step.sub = "无法解释";
+        }
+
+        steps.push(step);
+      });
+
+      steps.forEach((step) => {
+        if (step.type === "data") {
+          const total = planeCounts[step.plane];
+          step.totalPackets = total;
+          step.sub += `, ${step.packetNumber}/${total}`;
+        }
+      });
+
+      return { steps, mode, planeCounts };
+    }
+
+    function parseImageBin(bytes) {
+      const records = tryReadRecords(bytes);
+      const packets = records || readRawPackets(bytes);
+      const parsed = parsePackets(packets);
+      return {
+        format: records ? "records" : "raw",
+        packets,
+        ...parsed,
+      };
+    }
+
+    function resetPlanes() {
+      return {
+        screen: new Uint8Array(WIDTH * HEIGHT).fill(1),
+        bw: new Uint8Array(IMAGE_BYTES).fill(0xff),
+        red: new Uint8Array(IMAGE_BYTES),
+      };
+    }
+
+    function writePlaneBytes(target, offset, packet) {
+      target.set(packet.slice(1), offset);
+    }
+
+    function pixelIndexFromPacked(bitIndex) {
+      const scan = Math.floor(bitIndex);
+      const x = Math.floor(scan / HEIGHT);
+      const y = scan % HEIGHT;
+      return y * WIDTH + x;
+    }
+
+    function renderPlanes(planes) {
+      const image = ctx.createImageData(WIDTH, HEIGHT);
+
+      for (let byteIndex = 0; byteIndex < IMAGE_BYTES; byteIndex += 1) {
+        const bwByte = planes.bw[byteIndex];
+        const redByte = planes.red[byteIndex];
+
+        for (let bit = 0; bit < 8; bit += 1) {
+          const mask = 1 << (7 - bit);
+          const pixel = pixelIndexFromPacked(byteIndex * 8 + bit);
+          const out = pixel * 4;
+          const isRed = (redByte & mask) !== 0;
+          const isWhite = (bwByte & mask) !== 0;
+
+          if (isRed) {
+            image.data[out] = 217;
+            image.data[out + 1] = 45;
+            image.data[out + 2] = 32;
+          } else if (isWhite) {
+            image.data[out] = 255;
+            image.data[out + 1] = 255;
+            image.data[out + 2] = 255;
+          } else {
+            image.data[out] = 17;
+            image.data[out + 1] = 24;
+            image.data[out + 2] = 39;
+          }
+          image.data[out + 3] = 255;
+        }
+      }
+
+      ctx.putImageData(image, 0, 0);
+    }
+
+    function replayTo(index) {
+      const planes = resetPlanes();
+      for (let i = 0; i <= index; i += 1) {
+        const step = state.steps[i];
+        if (step.type === "clear") {
+          planes.bw.fill(step.packet[1]);
+          planes.red.fill(0x00);
+        } else if (step.type === "init") {
+          planes.bw.fill(0xff);
+          planes.red.fill(0x00);
+        } else if (step.type === "data") {
+          writePlaneBytes(step.plane === "red" ? planes.red : planes.bw, step.payloadOffset, step.packet);
+        }
+      }
+      renderPlanes(planes);
+    }
+
+    function renderTimeline() {
+      els.timeline.innerHTML = "";
+      if (state.steps.length === 0) {
+        els.timeline.innerHTML = '<div class="empty">选择一个 image.bin 文件</div>';
+        return;
+      }
+
+      state.steps.forEach((step, index) => {
+        const btn = document.createElement("button");
+        btn.className = "step" + (index === state.current ? " active" : "");
+        btn.type = "button";
+        btn.innerHTML = `
+          <span class="step-index">${String(index + 1).padStart(2, "0")}</span>
+          <span>
+            <span class="step-title">${escapeHtml(step.title)}</span>
+            <span class="step-sub">${escapeHtml(step.sub)}</span>
+          </span>
+          <span class="badge ${step.plane === "red" ? "red" : step.plane === "bw" ? "bw" : ""}">
+            ${escapeHtml(step.badge)}
+          </span>
+        `;
+        btn.addEventListener("click", () => setCurrent(index));
+        els.timeline.appendChild(btn);
+      });
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function setCurrent(index) {
+      if (state.steps.length === 0) {
+        state.current = -1;
+      } else {
+        state.current = Math.max(0, Math.min(index, state.steps.length - 1));
+      }
+
+      updateControls();
+      renderTimeline();
+      updateDetail();
+      if (state.current >= 0) {
+        replayTo(state.current);
+        const active = els.timeline.querySelector(".step.active");
+        if (active) {
+          active.scrollIntoView({ block: "nearest" });
+        }
+      } else {
+        renderPlanes(resetPlanes());
+      }
+    }
+
+    function updateControls() {
+      const total = state.steps.length;
+      const disabled = total === 0;
+      const connected = !!state.bleCharacteristic;
+      els.firstBtn.disabled = disabled || state.current <= 0;
+      els.prevBtn.disabled = disabled || state.current <= 0;
+      els.nextBtn.disabled = disabled || state.current >= total - 1;
+      els.lastBtn.disabled = disabled || state.current >= total - 1;
+      els.playBtn.disabled = disabled;
+      els.stepRange.disabled = disabled;
+      els.connectBleBtn.disabled = state.bleBusy;
+      els.uploadBleBtn.disabled = disabled || !connected || state.bleBusy;
+      els.stepRange.max = Math.max(0, total - 1);
+      els.stepRange.value = Math.max(0, state.current);
+      els.stepCounter.textContent = total ? `${state.current + 1} / ${total}` : "0 / 0";
+    }
+
+    function updateSummary(planeCounts) {
+      els.formatValue.textContent = state.format;
+      els.modeValue.textContent = state.mode;
+      els.packetValue.textContent = String(state.steps.length);
+      els.bwValue.textContent = `${planeCounts.bw || 0} 包`;
+      els.redValue.textContent = `${planeCounts.red || 0} 包`;
+    }
+
+    function updateDetail() {
+      const step = state.steps[state.current];
+      if (!step) {
+        els.detailTitle.textContent = "等待打开 image.bin";
+        els.offsetValue.textContent = "-";
+        els.lengthValue.textContent = "-";
+        els.commandValue.textContent = "-";
+        els.progressValue.textContent = "-";
+        els.hexValue.textContent = "";
+        return;
+      }
+
+      els.detailTitle.textContent = step.title;
+      els.offsetValue.textContent = `${step.offset} / 0x${step.offset.toString(16)}`;
+      els.lengthValue.textContent = `${step.length} bytes`;
+      els.commandValue.textContent = step.command;
+      els.progressValue.textContent = step.type === "data"
+        ? `${step.packetNumber}/${step.totalPackets}, ${step.payloadOffset}-${step.payloadOffset + step.payloadLength - 1}`
+        : step.sub;
+      els.hexValue.textContent = hexDump(step.packet, 512);
+    }
+
+    function stopPlayback() {
+      if (state.timer) {
+        clearInterval(state.timer);
+        state.timer = null;
+      }
+      els.playBtn.textContent = "播放";
+    }
+
+    function togglePlayback() {
+      if (state.timer) {
+        stopPlayback();
+        return;
+      }
+      els.playBtn.textContent = "暂停";
+      state.timer = setInterval(() => {
+        if (state.current >= state.steps.length - 1) {
+          stopPlayback();
+        } else {
+          setCurrent(state.current + 1);
+        }
+      }, 260);
+    }
+
+    function onBleDisconnected() {
+      state.bleServer = null;
+      state.bleCharacteristic = null;
+      setBleStatus("蓝牙已断开");
+      updateControls();
+    }
+
+    async function connectBleDevice() {
+      stopPlayback();
+      if (!navigator.bluetooth) {
+        setBleStatus("当前浏览器不支持 Web Bluetooth", "error");
+        return;
+      }
+
+      state.bleBusy = true;
+      updateControls();
+      setBleStatus("正在请求蓝牙权限...");
+
+      try {
+        const device = await navigator.bluetooth.requestDevice({
+          filters: BLE_DEVICE_NAMES.map((name) => ({ name })),
+          optionalServices: [BLE_SERVICE_UUID],
+        });
+
+        state.bleDevice = device;
+        state.bleDevice.removeEventListener("gattserverdisconnected", onBleDisconnected);
+        state.bleDevice.addEventListener("gattserverdisconnected", onBleDisconnected);
+
+        setBleStatus(`正在连接 ${device.name || BLE_DEVICE_NAMES[0]}...`);
+        state.bleServer = await device.gatt.connect();
+        const service = await state.bleServer.getPrimaryService(BLE_SERVICE_UUID);
+        state.bleCharacteristic = await service.getCharacteristic(BLE_CHARACTERISTIC_UUID);
+        await state.bleCharacteristic.startNotifications();
+
+        setBleStatus(`已连接 ${device.name || BLE_DEVICE_NAMES[0]}`, "connected");
+      } catch (error) {
+        state.bleCharacteristic = null;
+        setBleStatus(error.message, "error");
+      } finally {
+        state.bleBusy = false;
+        updateControls();
+      }
+    }
+
+    function waitForBleAck() {
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          state.bleCharacteristic.removeEventListener("characteristicvaluechanged", onValue);
+          reject(new Error("等待设备回包超时"));
+        }, BLE_ACK_TIMEOUT_MS);
+
+        function onValue(event) {
+          clearTimeout(timer);
+          state.bleCharacteristic.removeEventListener("characteristicvaluechanged", onValue);
+          resolve(new Uint8Array(event.target.value.buffer));
+        }
+
+        state.bleCharacteristic.addEventListener("characteristicvaluechanged", onValue);
+      });
+    }
+
+    async function uploadBlePackets() {
+      if (!state.bleCharacteristic) {
+        setBleStatus("请先连接设备", "error");
+        return;
+      }
+      if (state.steps.length === 0) {
+        setBleStatus("请先打开 image.bin", "error");
+        return;
+      }
+
+      stopPlayback();
+      state.bleBusy = true;
+      updateControls();
+
+      try {
+        for (let i = 0; i < state.steps.length; i += 1) {
+          const step = state.steps[i];
+          setCurrent(i);
+          setBleStatus(`写入 ${i + 1}/${state.steps.length}: ${step.title}`);
+
+          const ackPromise = waitForBleAck();
+          await state.bleCharacteristic.writeValueWithResponse(step.packet);
+          const ack = await ackPromise;
+          console.log(`BLE ack ${i + 1}/${state.steps.length}: ${Array.from(ack, hex2).join("")}`);
+        }
+
+        setBleStatus("写入完成", "connected");
+      } catch (error) {
+        setBleStatus(error.message, "error");
+      } finally {
+        state.bleBusy = false;
+        updateControls();
+      }
+    }
+
+    async function openFile(file) {
+      stopPlayback();
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const parsed = parseImageBin(bytes);
+        state.fileBytes = bytes;
+        state.steps = parsed.steps;
+        state.format = parsed.format;
+        state.mode = parsed.mode;
+        els.statusText.textContent = `${file.name}, ${bytes.length} bytes`;
+        updateSummary(parsed.planeCounts);
+        setCurrent(0);
+      } catch (error) {
+        state.fileBytes = new Uint8Array();
+        state.steps = [];
+        state.format = "-";
+        state.mode = "-";
+        els.statusText.innerHTML = `<span class="error">${escapeHtml(error.message)}</span>`;
+        updateSummary({ bw: 0, red: 0 });
+        setCurrent(-1);
+      }
+    }
+
+    els.fileInput.addEventListener("change", () => {
+      const file = els.fileInput.files[0];
+      if (file) {
+        openFile(file);
+      }
+    });
+    els.firstBtn.addEventListener("click", () => setCurrent(0));
+    els.prevBtn.addEventListener("click", () => setCurrent(state.current - 1));
+    els.nextBtn.addEventListener("click", () => setCurrent(state.current + 1));
+    els.lastBtn.addEventListener("click", () => setCurrent(state.steps.length - 1));
+    els.playBtn.addEventListener("click", togglePlayback);
+    els.stepRange.addEventListener("input", () => setCurrent(Number(els.stepRange.value)));
+    els.connectBleBtn.addEventListener("click", connectBleDevice);
+    els.uploadBleBtn.addEventListener("click", uploadBlePackets);
+
+    renderPlanes(resetPlanes());
+    updateControls();
+  </script>
+</body>
+
+</html>
