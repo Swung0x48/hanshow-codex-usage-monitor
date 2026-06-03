@@ -36,6 +36,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 MATRIX_SANS_PATH = PROJECT_ROOT / "MatrixSans-Regular.ttf"
 DEFAULT_CODEX_HOME = Path.home() / ".codex"
 DEFAULT_USAGE_API_URL = "https://chatgpt.com/backend-api/wham/usage"
+DEFAULT_UPLOAD_STATE_PATH = PROJECT_ROOT / ".last_upload_state.json"
 
 
 @dataclass(frozen=True)
@@ -226,6 +227,72 @@ def get_usage(args: argparse.Namespace) -> UsageSnapshot:
         return env_usage
 
     return usage_from_api(args)
+
+
+def upload_state(snapshot: UsageSnapshot, args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "version": 1,
+        "five_hour": {
+            "percent": round(snapshot.five_hour.percent),
+            "reset": snapshot.five_hour.reset,
+        },
+        "week": {
+            "percent": round(snapshot.week.percent),
+            "reset": snapshot.week.reset,
+        },
+        "render": {
+            "color_mode": args.color_mode,
+            "bold": bool(args.bold),
+        },
+    }
+
+
+def read_upload_state(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return comparable_upload_state(data)
+
+
+def comparable_upload_state(state: dict[str, Any]) -> dict[str, Any] | None:
+    try:
+        return {
+            "version": state["version"],
+            "five_hour": {
+                "percent": state["five_hour"]["percent"],
+                "reset": state["five_hour"]["reset"],
+            },
+            "week": {
+                "percent": state["week"]["percent"],
+                "reset": state["week"]["reset"],
+            },
+            "render": {
+                "color_mode": state["render"]["color_mode"],
+                "bold": state["render"]["bold"],
+            },
+        }
+    except (KeyError, TypeError):
+        return None
+
+
+def write_upload_state(path: Path, state: dict[str, Any]) -> None:
+    data = {
+        **state,
+        "uploaded_at": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def upload_state_summary(state: dict[str, Any]) -> str:
+    return (
+        f"5h={state['five_hour']['percent']}% reset={state['five_hour']['reset']} "
+        f"1wk={state['week']['percent']}% reset={state['week']['reset']} "
+        f"color_mode={state['render']['color_mode']} bold={state['render']['bold']}"
+    )
 
 
 def find_font(names: list[str], size: int) -> ImageFont.ImageFont:
@@ -583,6 +650,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--api-timeout", type=int, default=20, help="Codex usage API timeout seconds")
     parser.add_argument("--codex-home", default=str(DEFAULT_CODEX_HOME), help="Codex home containing auth.json")
     parser.add_argument("--upload", action="store_true", help="upload the generated payload to the BLE e-paper tag")
+    parser.add_argument("--force-update", action="store_true", help="upload even if the displayed usage state has not changed since the last successful upload")
+    parser.add_argument("--upload-state-file", default=str(DEFAULT_UPLOAD_STATE_PATH), help="file used to remember the last successfully uploaded usage state")
     parser.add_argument("--ble-name", action="append", default=BLE_DEVICE_NAMES, help="allowed BLE device name; can be repeated")
     parser.add_argument("--ble-service-uuid", default=BLE_SERVICE_UUID, help="BLE GATT service UUID")
     parser.add_argument("--ble-characteristic-uuid", default=BLE_CHARACTERISTIC_UUID, help="BLE GATT characteristic UUID")
@@ -612,6 +681,15 @@ def main() -> None:
         print(f"wrote preview {args.preview}")
 
     if args.upload:
+        state_path = Path(args.upload_state_file)
+        current_state = upload_state(snapshot, args)
+        previous_state = read_upload_state(state_path)
+        if previous_state == current_state and not args.force_update:
+            print(f"skipping upload: unchanged since last successful upload ({upload_state_summary(current_state)})")
+            return
+        if previous_state == current_state and args.force_update:
+            print("force-update enabled: uploading unchanged state")
+
         packets, payload_format = parse_image_bin(payload)
         print(f"uploading {len(packets)} packets ({payload_format} format)")
         try:
@@ -619,6 +697,8 @@ def main() -> None:
         except RuntimeError as exc:
             print(f"upload error: {exc}", file=sys.stderr)
             raise SystemExit(1) from exc
+        write_upload_state(state_path, current_state)
+        print(f"saved upload state to {state_path}")
 
 
 if __name__ == "__main__":

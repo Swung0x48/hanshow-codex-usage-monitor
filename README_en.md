@@ -118,12 +118,17 @@ The script scans by advertised device name, then connects to the UART service:
 
 Each packet is written with response. The script waits for notification ACKs after each packet except the final display-update command.
 
+The script saves the last successfully uploaded display state to `.last_upload_state.json`. If the current 5-hour/1-week percentages, reset labels, and display options are unchanged, `--upload` skips the BLE write.
+
 Useful options:
 
 ```powershell
 python update_codex_payload.py --upload --ble-scan-timeout 60000
 python update_codex_payload.py --upload --ble-name "SPP BLE Server"
+python update_codex_payload.py --upload --force-update
 ```
+
+`--force-update` ignores the cached upload state and writes to the device every time.
 
 ## Debug A Bin File
 

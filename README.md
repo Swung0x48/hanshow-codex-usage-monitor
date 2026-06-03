@@ -120,12 +120,17 @@ python update_codex_payload.py --upload
 
 上传时，每个包都会使用 write with response。除最后一个显示刷新命令外，其余包都会等待设备 notification ACK。
 
+脚本会把上一次成功上传到设备的显示状态保存到 `.last_upload_state.json`。如果本次获取到的 5 小时/1 周百分比、reset 文本以及显示选项没有变化，`--upload` 会跳过蓝牙写入。
+
 常用选项：
 
 ```powershell
 python update_codex_payload.py --upload --ble-scan-timeout 60000
 python update_codex_payload.py --upload --ble-name "SPP BLE Server"
+python update_codex_payload.py --upload --force-update
 ```
+
+`--force-update` 会忽略上次上传状态，强制每次运行都写入设备。
 
 ## 调试 Bin 文件
 
