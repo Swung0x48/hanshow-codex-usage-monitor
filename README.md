@@ -71,6 +71,12 @@ python update_codex_payload.py --color-mode bw
 
 `bwr` 是默认模式，5 小时额度会用红色显示，并输出黑白红 payload。`bw` 会把全部内容渲染成黑白，并输出不包含红色平面的黑白 payload。
 
+默认文字使用普通字重。如果需要加粗上下两行文字：
+
+```powershell
+python update_codex_payload.py --bold
+```
+
 手动指定数值：
 
 ```powershell

@@ -293,11 +293,12 @@ def choose_text_columns(
     left_texts: list[str],
     percent_texts: list[str],
     reset_texts: list[str],
+    stroke_width: int = 0,
 ) -> tuple[int, int, int]:
     safe_gap = 4
-    left_width = max(text_size(draw, text, font)[0] for text in left_texts)
-    percent_width = max(text_size(draw, text, font)[0] for text in percent_texts)
-    reset_width = max(text_size(draw, text, font)[0] for text in reset_texts)
+    left_width = max(text_size(draw, text, font, stroke_width=stroke_width)[0] for text in left_texts)
+    percent_width = max(text_size(draw, text, font, stroke_width=stroke_width)[0] for text in percent_texts)
+    reset_width = max(text_size(draw, text, font, stroke_width=stroke_width)[0] for text in reset_texts)
 
     def valid(left_x: int, percent_x: int, reset_right_x: int) -> bool:
         reset_left_x = reset_right_x - reset_width
@@ -319,7 +320,7 @@ def choose_text_columns(
     return 10, 43, 198
 
 
-def render_usage_image(snapshot: UsageSnapshot, color_mode: str) -> Image.Image:
+def render_usage_image(snapshot: UsageSnapshot, color_mode: str, bold: bool) -> Image.Image:
     image = Image.new("RGB", (WIDTH, HEIGHT), WHITE)
     draw = ImageDraw.Draw(image)
 
@@ -343,21 +344,23 @@ def render_usage_image(snapshot: UsageSnapshot, color_mode: str) -> Image.Image:
 
     five_percent = f"{round(snapshot.five_hour.percent):d}%"
     week_percent = f"{round(snapshot.week.percent):d}%"
+    text_stroke = 1 if bold else 0
     left_x, percent_x, reset_right_x = choose_text_columns(
         draw,
         font,
         [snapshot.five_hour.label, snapshot.week.label],
         [five_percent, week_percent],
         [snapshot.five_hour.reset, snapshot.week.reset],
+        stroke_width=text_stroke,
     )
 
-    draw_text(draw, (left_x, 48), snapshot.five_hour.label, font, five_color)
-    draw_text(draw, (percent_x, 48), five_percent, font, five_color)
-    draw_right(draw, reset_right_x, 48, snapshot.five_hour.reset, font, five_color)
+    draw_text(draw, (left_x, 48), snapshot.five_hour.label, font, five_color, stroke_width=text_stroke)
+    draw_text(draw, (percent_x, 48), five_percent, font, five_color, stroke_width=text_stroke)
+    draw_right(draw, reset_right_x, 48, snapshot.five_hour.reset, font, five_color, stroke_width=text_stroke)
 
-    draw_text(draw, (left_x, 82), snapshot.week.label, font, BLACK)
-    draw_text(draw, (percent_x, 82), week_percent, font, BLACK)
-    draw_right(draw, reset_right_x, 82, snapshot.week.reset, font, BLACK)
+    draw_text(draw, (left_x, 82), snapshot.week.label, font, BLACK, stroke_width=text_stroke)
+    draw_text(draw, (percent_x, 82), week_percent, font, BLACK, stroke_width=text_stroke)
+    draw_right(draw, reset_right_x, 82, snapshot.week.reset, font, BLACK, stroke_width=text_stroke)
 
     return image
 
@@ -566,6 +569,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--demo", action="store_true", help="render sample values matching progressbar.bmp")
     parser.add_argument("--usage-json", default="", help="JSON string or path containing 5h and 1wk usage fields")
     parser.add_argument("--color-mode", choices=["bwr", "bw"], default="bwr", help="display/output color mode: bwr uses red, bw is black/white only")
+    parser.add_argument("--bold", action="store_true", help="render the two text rows in bold")
     parser.add_argument("--five-hour-percent", default="", help="5h usage percent, e.g. 50 or 50%")
     parser.add_argument("--five-hour-reset", default="", help="5h reset label, e.g. 14:00")
     parser.add_argument("--week-percent", default="", help="1wk usage percent, e.g. 90 or 90%")
@@ -586,7 +590,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     snapshot = get_usage(args)
-    image = render_usage_image(snapshot, args.color_mode)
+    image = render_usage_image(snapshot, args.color_mode, args.bold)
     payload = build_payload(image, args.color_mode)
 
     Path(args.output).write_bytes(payload)

@@ -69,6 +69,12 @@ python update_codex_payload.py --color-mode bw
 
 `bwr` is the default and renders the 5-hour quota in red. `bw` renders everything in black and white and outputs a BW-only payload without the red plane.
 
+Text uses the regular font weight by default. To render both text rows in bold:
+
+```powershell
+python update_codex_payload.py --bold
+```
+
 Manual values:
 
 ```powershell
