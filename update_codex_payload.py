@@ -23,7 +23,7 @@ WIDTH = 212
 HEIGHT = 104
 IMAGE_BYTES = (WIDTH * HEIGHT) // 8
 CHUNK_BYTES = 200
-BLE_DEVICE_NAMES = ["Ihopeseral_uarttrans", "SPP BLE Server", "Octppus_uarttrans"]
+BLE_DEVICE_NAMES = ["Ihopeseral_uarttrans"]
 BLE_SERVICE_UUID = "f000fff0-0451-4000-b000-000000000000"
 BLE_CHARACTERISTIC_UUID = "f000fff1-0451-4000-b000-000000000000"
 BLE_ACK_TIMEOUT_MS = 10000
@@ -402,10 +402,13 @@ def append_image_packets(packets: list[bytes], command: int, payload: bytes) -> 
         packets.append(bytes([0x02]) + payload[offset : offset + CHUNK_BYTES])
 
 
-def build_payload(image: Image.Image, color_mode: str) -> bytes:
+def build_payload(image: Image.Image, color_mode: str, clear_first: bool) -> bytes:
     bw = pack_plane(image, "bw")
     init_mode = 0x02 if color_mode == "bwr" else 0x01
-    packets: list[bytes] = [bytes([0x01, 0xFF]), bytes([0x00, init_mode])]
+    packets: list[bytes] = []
+    if clear_first:
+        packets.append(bytes([0x01, 0xFF]))
+    packets.append(bytes([0x00, init_mode]))
     append_image_packets(packets, 0x04, bw)
     if color_mode == "bwr":
         red = pack_plane(image, "red")
@@ -570,6 +573,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--usage-json", default="", help="JSON string or path containing 5h and 1wk usage fields")
     parser.add_argument("--color-mode", choices=["bwr", "bw"], default="bwr", help="display/output color mode: bwr uses red, bw is black/white only")
     parser.add_argument("--bold", action="store_true", help="render the two text rows in bold")
+    parser.add_argument("--no-clear", action="store_true", help="do not prepend the clear-to-white command")
     parser.add_argument("--five-hour-percent", default="", help="5h usage percent, e.g. 50 or 50%")
     parser.add_argument("--five-hour-reset", default="", help="5h reset label, e.g. 14:00")
     parser.add_argument("--week-percent", default="", help="1wk usage percent, e.g. 90 or 90%")
@@ -591,7 +595,7 @@ def main() -> None:
     args = parse_args()
     snapshot = get_usage(args)
     image = render_usage_image(snapshot, args.color_mode, args.bold)
-    payload = build_payload(image, args.color_mode)
+    payload = build_payload(image, args.color_mode, clear_first=not args.no_clear)
 
     Path(args.output).write_bytes(payload)
     if args.preview:

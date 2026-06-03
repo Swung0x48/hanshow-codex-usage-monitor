@@ -75,6 +75,12 @@ Text uses the regular font weight by default. To render both text rows in bold:
 python update_codex_payload.py --bold
 ```
 
+By default the payload starts with a clear-to-white command. To skip that command:
+
+```powershell
+python update_codex_payload.py --no-clear
+```
+
 Manual values:
 
 ```powershell

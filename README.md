@@ -77,6 +77,12 @@ python update_codex_payload.py --color-mode bw
 python update_codex_payload.py --bold
 ```
 
+默认 payload 会先发送清屏为全白命令。如果不想在写入前清屏：
+
+```powershell
+python update_codex_payload.py --no-clear
+```
+
 手动指定数值：
 
 ```powershell
