@@ -245,46 +245,78 @@ def load_text_font(size: int) -> ImageFont.ImageFont:
     return find_font(["arial.ttf", "segoeui.ttf", "consola.ttf"], size)
 
 
-def text_size(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> tuple[int, int]:
-    box = draw.textbbox((0, 0), text, font=font)
+def text_size(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, stroke_width: int = 0) -> tuple[int, int]:
+    box = draw.textbbox((0, 0), text, font=font, stroke_width=stroke_width)
     return box[2] - box[0], box[3] - box[1]
 
 
-def draw_right(draw: ImageDraw.ImageDraw, x: int, y: int, text: str, font: ImageFont.ImageFont, fill: tuple[int, int, int]) -> None:
-    width, _ = text_size(draw, text, font)
-    draw.text((x - width, y), text, font=font, fill=fill)
+def draw_text(
+    draw: ImageDraw.ImageDraw,
+    xy: tuple[int, int],
+    text: str,
+    font: ImageFont.ImageFont,
+    fill: tuple[int, int, int],
+    stroke_width: int = 0,
+) -> None:
+    draw.text(xy, text, font=font, fill=fill, stroke_width=stroke_width, stroke_fill=fill)
 
 
-def render_usage_image(snapshot: UsageSnapshot) -> Image.Image:
+def draw_right(
+    draw: ImageDraw.ImageDraw,
+    x: int,
+    y: int,
+    text: str,
+    font: ImageFont.ImageFont,
+    fill: tuple[int, int, int],
+    stroke_width: int = 0,
+) -> None:
+    width, _ = text_size(draw, text, font, stroke_width=stroke_width)
+    draw_text(draw, (x - width, y), text, font, fill, stroke_width=stroke_width)
+
+
+def draw_dithered_rect(
+    draw: ImageDraw.ImageDraw,
+    rect: tuple[int, int, int, int],
+    fill: tuple[int, int, int] = BLACK,
+) -> None:
+    x1, y1, x2, y2 = rect
+    for y in range(y1, y2 + 1):
+        for x in range(x1, x2 + 1):
+            if (x + y) % 2 == 0:
+                draw.point((x, y), fill=fill)
+
+
+def render_usage_image(snapshot: UsageSnapshot, color_mode: str) -> Image.Image:
     image = Image.new("RGB", (WIDTH, HEIGHT), WHITE)
     draw = ImageDraw.Draw(image)
 
     font = load_text_font(18)
+    five_color = RED if color_mode == "bwr" else BLACK
 
     frame = (2, 2, 209, 40)
     frame_inner = (7, 7, 204, 36)
     five_bar = (9, 9, 204, 20)
     week_bar = (9, 24, 204, 34)
 
-    draw.rectangle(frame, fill=BLACK)
+    draw_dithered_rect(draw, frame)
     draw.rectangle(frame_inner, fill=WHITE)
 
     five_width = int(round((five_bar[2] - five_bar[0] + 1) * snapshot.five_hour.percent / 100))
     week_width = int(round((week_bar[2] - week_bar[0] + 1) * snapshot.week.percent / 100))
     if five_width > 0:
-        draw.rectangle((five_bar[0], five_bar[1], five_bar[0] + five_width - 1, five_bar[3]), fill=RED)
+        draw.rectangle((five_bar[0], five_bar[1], five_bar[0] + five_width - 1, five_bar[3]), fill=five_color)
     if week_width > 0:
         draw.rectangle((week_bar[0], week_bar[1], week_bar[0] + week_width - 1, week_bar[3]), fill=BLACK)
 
     five_percent = f"{round(snapshot.five_hour.percent):d}%"
     week_percent = f"{round(snapshot.week.percent):d}%"
 
-    draw.text((4, 48), snapshot.five_hour.label, font=font, fill=RED)
-    draw.text((43, 48), five_percent, font=font, fill=RED)
-    draw_right(draw, 208, 48, snapshot.five_hour.reset, font, RED)
+    draw_text(draw, (4, 48), snapshot.five_hour.label, font, five_color)
+    draw_text(draw, (43, 48), five_percent, font, five_color)
+    draw_right(draw, 208, 48, snapshot.five_hour.reset, font, five_color)
 
-    draw.text((4, 82), snapshot.week.label, font=font, fill=BLACK)
-    draw.text((43, 82), week_percent, font=font, fill=BLACK)
+    draw_text(draw, (4, 82), snapshot.week.label, font, BLACK)
+    draw_text(draw, (43, 82), week_percent, font, BLACK)
     draw_right(draw, 208, 82, snapshot.week.reset, font, BLACK)
 
     return image
@@ -327,12 +359,14 @@ def append_image_packets(packets: list[bytes], command: int, payload: bytes) -> 
         packets.append(bytes([0x02]) + payload[offset : offset + CHUNK_BYTES])
 
 
-def build_payload(image: Image.Image) -> bytes:
+def build_payload(image: Image.Image, color_mode: str) -> bytes:
     bw = pack_plane(image, "bw")
-    red = pack_plane(image, "red")
-    packets: list[bytes] = [bytes([0x01, 0xFF]), bytes([0x00, 0x02])]
+    init_mode = 0x02 if color_mode == "bwr" else 0x01
+    packets: list[bytes] = [bytes([0x01, 0xFF]), bytes([0x00, init_mode])]
     append_image_packets(packets, 0x04, bw)
-    append_image_packets(packets, 0x05, red)
+    if color_mode == "bwr":
+        red = pack_plane(image, "red")
+        append_image_packets(packets, 0x05, red)
     packets.append(bytes([0x03]))
     return b"".join(packets)
 
@@ -491,6 +525,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--preview", default="", help="optional preview BMP path")
     parser.add_argument("--demo", action="store_true", help="render sample values matching progressbar.bmp")
     parser.add_argument("--usage-json", default="", help="JSON string or path containing 5h and 1wk usage fields")
+    parser.add_argument("--color-mode", choices=["bwr", "bw"], default="bwr", help="display/output color mode: bwr uses red, bw is black/white only")
     parser.add_argument("--five-hour-percent", default="", help="5h usage percent, e.g. 50 or 50%")
     parser.add_argument("--five-hour-reset", default="", help="5h reset label, e.g. 14:00")
     parser.add_argument("--week-percent", default="", help="1wk usage percent, e.g. 90 or 90%")
@@ -511,8 +546,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     snapshot = get_usage(args)
-    image = render_usage_image(snapshot)
-    payload = build_payload(image)
+    image = render_usage_image(snapshot, args.color_mode)
+    payload = build_payload(image, args.color_mode)
 
     Path(args.output).write_bytes(payload)
     if args.preview:
@@ -520,6 +555,7 @@ def main() -> None:
 
     print(
         f"source={snapshot.source} "
+        f"color_mode={args.color_mode} "
         f"5h={snapshot.five_hour.percent:.0f}% reset={snapshot.five_hour.reset} "
         f"1wk={snapshot.week.percent:.0f}% reset={snapshot.week.reset}"
     )

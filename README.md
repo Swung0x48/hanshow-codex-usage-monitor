@@ -62,6 +62,15 @@ python update_codex_payload.py --output codex_usage.bin --preview codex_usage.bm
 python update_codex_payload.py --demo --output codex_usage.bin --preview codex_usage.bmp
 ```
 
+颜色模式：
+
+```powershell
+python update_codex_payload.py --color-mode bwr
+python update_codex_payload.py --color-mode bw
+```
+
+`bwr` 是默认模式，5 小时额度会用红色显示，并输出黑白红 payload。`bw` 会把全部内容渲染成黑白，并输出不包含红色平面的黑白 payload。
+
 手动指定数值：
 
 ```powershell
