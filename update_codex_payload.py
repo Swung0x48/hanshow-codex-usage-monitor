@@ -8,6 +8,7 @@ import asyncio
 import datetime as dt
 import json
 import os
+import random
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -286,6 +287,38 @@ def draw_dithered_rect(
                 draw.point((x, y), fill=fill)
 
 
+def choose_text_columns(
+    draw: ImageDraw.ImageDraw,
+    font: ImageFont.ImageFont,
+    left_texts: list[str],
+    percent_texts: list[str],
+    reset_texts: list[str],
+) -> tuple[int, int, int]:
+    safe_gap = 4
+    left_width = max(text_size(draw, text, font)[0] for text in left_texts)
+    percent_width = max(text_size(draw, text, font)[0] for text in percent_texts)
+    reset_width = max(text_size(draw, text, font)[0] for text in reset_texts)
+
+    def valid(left_x: int, percent_x: int, reset_right_x: int) -> bool:
+        reset_left_x = reset_right_x - reset_width
+        return (
+            left_x >= 0
+            and reset_right_x <= WIDTH
+            and left_x + left_width + safe_gap <= percent_x
+            and percent_x + percent_width + safe_gap <= reset_left_x
+        )
+
+    for _ in range(200):
+        left_x = 10 + random.randint(-10, 10)
+        percent_x = 43 + random.randint(-10, 10)
+        reset_right_x = 198 + random.randint(-10, 10)
+        if valid(left_x, percent_x, reset_right_x):
+            return left_x, percent_x, reset_right_x
+
+    # Fallback for unusually wide labels: keep the columns safely separated.
+    return 10, 43, 198
+
+
 def render_usage_image(snapshot: UsageSnapshot, color_mode: str) -> Image.Image:
     image = Image.new("RGB", (WIDTH, HEIGHT), WHITE)
     draw = ImageDraw.Draw(image)
@@ -310,14 +343,21 @@ def render_usage_image(snapshot: UsageSnapshot, color_mode: str) -> Image.Image:
 
     five_percent = f"{round(snapshot.five_hour.percent):d}%"
     week_percent = f"{round(snapshot.week.percent):d}%"
+    left_x, percent_x, reset_right_x = choose_text_columns(
+        draw,
+        font,
+        [snapshot.five_hour.label, snapshot.week.label],
+        [five_percent, week_percent],
+        [snapshot.five_hour.reset, snapshot.week.reset],
+    )
 
-    draw_text(draw, (4, 48), snapshot.five_hour.label, font, five_color)
-    draw_text(draw, (43, 48), five_percent, font, five_color)
-    draw_right(draw, 208, 48, snapshot.five_hour.reset, font, five_color)
+    draw_text(draw, (left_x, 48), snapshot.five_hour.label, font, five_color)
+    draw_text(draw, (percent_x, 48), five_percent, font, five_color)
+    draw_right(draw, reset_right_x, 48, snapshot.five_hour.reset, font, five_color)
 
-    draw_text(draw, (4, 82), snapshot.week.label, font, BLACK)
-    draw_text(draw, (43, 82), week_percent, font, BLACK)
-    draw_right(draw, 208, 82, snapshot.week.reset, font, BLACK)
+    draw_text(draw, (left_x, 82), snapshot.week.label, font, BLACK)
+    draw_text(draw, (percent_x, 82), week_percent, font, BLACK)
+    draw_right(draw, reset_right_x, 82, snapshot.week.reset, font, BLACK)
 
     return image
 
