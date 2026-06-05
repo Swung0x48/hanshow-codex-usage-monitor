@@ -122,11 +122,14 @@ python update_codex_payload.py --upload
 
 脚本会把上一次成功上传到设备的显示状态保存到 `.last_upload_state.json`。如果本次获取到的 5 小时/1 周百分比、reset 文本以及显示选项没有变化，`--upload` 会跳过蓝牙写入。
 
+如果希望 5 小时额度满额时进一步减少不必要刷新，可以加 `--skip-full-cache`。原有的“显示状态完全没变则跳过”仍然保留；除此以外，只要上一次成功上传和本次获取到的 5 小时百分比都是 `100%`，且 1 周显示状态和上次完全一样，就会跳过蓝牙写入，即使 5 小时 reset 文本变化也不会刷新。
+
 常用选项：
 
 ```powershell
 python update_codex_payload.py --upload --ble-scan-timeout 60000
 python update_codex_payload.py --upload --ble-name "SPP BLE Server"
+python update_codex_payload.py --upload --skip-full-cache
 python update_codex_payload.py --upload --force-update
 ```
 

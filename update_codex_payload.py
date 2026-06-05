@@ -13,7 +13,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from PIL import Image, ImageDraw, ImageFont
@@ -51,6 +51,15 @@ class UsageSnapshot:
     five_hour: UsageWindow
     week: UsageWindow
     source: str
+
+
+@dataclass(frozen=True)
+class TextLayout:
+    left_x: int
+    percent_x: int
+    reset_right_x: int
+    five_y: int
+    week_y: int
 
 
 def parse_percent(value: Any, name: str) -> float:
@@ -166,6 +175,57 @@ def remaining_percent(used_percent: Any, name: str) -> float:
     return 100.0 - parse_api_percent(used_percent, name)
 
 
+def api_window_is_usable(value: Any) -> bool:
+    return isinstance(value, dict) and value.get("used_percent") not in (None, "")
+
+
+def describe_api_window(value: Any) -> str:
+    if value is None:
+        return "<null>"
+    if not isinstance(value, dict):
+        return f"<{type(value).__name__}>"
+
+    parts = []
+    for key in ("used_percent", "reset_at", "reset_after_seconds", "limit_window_seconds"):
+        if key in value:
+            parts.append(f"{key}={value.get(key)!r}")
+    return "{" + ", ".join(parts) + "}" if parts else "{}"
+
+
+def api_rate_limit_candidates(data: dict[str, Any]) -> list[tuple[str, Any]]:
+    candidates: list[tuple[str, Any]] = [("rate_limit", data.get("rate_limit") or data)]
+    additional = data.get("additional_rate_limits")
+    if isinstance(additional, list):
+        for index, item in enumerate(additional):
+            if not isinstance(item, dict):
+                continue
+            name = item.get("limit_name") or item.get("metered_feature") or f"#{index}"
+            candidates.append((f"additional_rate_limits[{index}] {name}", item.get("rate_limit") or item))
+    return candidates
+
+
+def select_api_windows(data: dict[str, Any]) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    summaries = []
+    for name, rate_limit in api_rate_limit_candidates(data):
+        if not isinstance(rate_limit, dict):
+            summaries.append(f"{name}: <{type(rate_limit).__name__}>")
+            continue
+
+        primary = rate_limit.get("primary_window")
+        secondary = rate_limit.get("secondary_window")
+        summaries.append(
+            f"{name}: primary_window={describe_api_window(primary)}, "
+            f"secondary_window={describe_api_window(secondary)}"
+        )
+        if api_window_is_usable(primary) and api_window_is_usable(secondary):
+            return name, primary, secondary
+
+    raise RuntimeError(
+        "Codex usage API is reachable, but no complete primary_window/secondary_window pair was found. "
+        "Seen: " + "; ".join(summaries)
+    )
+
+
 def usage_from_api(args: argparse.Namespace) -> UsageSnapshot:
     token = args.api_token or os.environ.get("CODEX_USAGE_TOKEN") or auth_token_from_codex_home(Path(args.codex_home))
     request = Request(
@@ -181,12 +241,10 @@ def usage_from_api(args: argparse.Namespace) -> UsageSnapshot:
             data = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         raise RuntimeError(f"Codex usage API returned HTTP {exc.code}: {args.api_url}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"Cannot connect to Codex usage API: {exc.reason}") from exc
 
-    rate_limit = data.get("rate_limit") or data
-    primary = rate_limit.get("primary_window") or {}
-    secondary = rate_limit.get("secondary_window") or {}
-    if not primary or not secondary:
-        raise RuntimeError("Codex usage API response does not contain primary_window/secondary_window")
+    source_name, primary, secondary = select_api_windows(data)
 
     return UsageSnapshot(
         five_hour=UsageWindow(
@@ -199,7 +257,7 @@ def usage_from_api(args: argparse.Namespace) -> UsageSnapshot:
             remaining_percent(secondary.get("used_percent"), "secondary_window.used_percent"),
             reset_time_label(secondary.get("reset_at"), secondary.get("reset_after_seconds"), "date"),
         ),
-        source="api",
+        source=f"api:{source_name}",
     )
 
 
@@ -295,6 +353,20 @@ def upload_state_summary(state: dict[str, Any]) -> str:
     )
 
 
+def upload_state_can_skip_full_five_hour(previous_state: dict[str, Any] | None, current_state: dict[str, Any]) -> bool:
+    if not previous_state:
+        return False
+    try:
+        return (
+            int(previous_state["five_hour"]["percent"]) == 100
+            and int(current_state["five_hour"]["percent"]) == 100
+            and previous_state["week"] == current_state["week"]
+            and previous_state["render"] == current_state["render"]
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
 def find_font(names: list[str], size: int) -> ImageFont.ImageFont:
     windir = os.environ.get("WINDIR")
     if not windir:
@@ -318,6 +390,21 @@ def text_size(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, s
     return box[2] - box[0], box[3] - box[1]
 
 
+def text_box(
+    draw: ImageDraw.ImageDraw,
+    xy: tuple[int, int],
+    text: str,
+    font: ImageFont.ImageFont,
+    stroke_width: int = 0,
+) -> tuple[int, int, int, int]:
+    return draw.textbbox(xy, text, font=font, stroke_width=stroke_width)
+
+
+def right_text_x(draw: ImageDraw.ImageDraw, right_x: int, text: str, font: ImageFont.ImageFont, stroke_width: int = 0) -> int:
+    box = text_box(draw, (0, 0), text, font, stroke_width=stroke_width)
+    return right_x - box[2]
+
+
 def draw_text(
     draw: ImageDraw.ImageDraw,
     xy: tuple[int, int],
@@ -338,8 +425,7 @@ def draw_right(
     fill: tuple[int, int, int],
     stroke_width: int = 0,
 ) -> None:
-    width, _ = text_size(draw, text, font, stroke_width=stroke_width)
-    draw_text(draw, (x - width, y), text, font, fill, stroke_width=stroke_width)
+    draw_text(draw, (right_text_x(draw, x, text, font, stroke_width=stroke_width), y), text, font, fill, stroke_width=stroke_width)
 
 
 def draw_dithered_rect(
@@ -354,37 +440,124 @@ def draw_dithered_rect(
                 draw.point((x, y), fill=fill)
 
 
-def choose_text_columns(
+def choose_text_layout(
     draw: ImageDraw.ImageDraw,
     font: ImageFont.ImageFont,
     left_texts: list[str],
     percent_texts: list[str],
     reset_texts: list[str],
     stroke_width: int = 0,
-) -> tuple[int, int, int]:
+) -> TextLayout:
     safe_gap = 4
+    edge_margin = 3
+    bottom_margin = 6
+    center_slack = 4
+    text_area_top = 43
+    text_area_bottom = HEIGHT - bottom_margin
     left_width = max(text_size(draw, text, font, stroke_width=stroke_width)[0] for text in left_texts)
     percent_width = max(text_size(draw, text, font, stroke_width=stroke_width)[0] for text in percent_texts)
     reset_width = max(text_size(draw, text, font, stroke_width=stroke_width)[0] for text in reset_texts)
+    five_height = max(
+        text_size(draw, text, font, stroke_width=stroke_width)[1]
+        for text in (left_texts[0], percent_texts[0], reset_texts[0])
+    )
+    week_height = max(
+        text_size(draw, text, font, stroke_width=stroke_width)[1]
+        for text in (left_texts[1], percent_texts[1], reset_texts[1])
+    )
 
-    def valid(left_x: int, percent_x: int, reset_right_x: int) -> bool:
-        reset_left_x = reset_right_x - reset_width
-        return (
-            left_x >= 0
-            and reset_right_x <= WIDTH
-            and left_x + left_width + safe_gap <= percent_x
-            and percent_x + percent_width + safe_gap <= reset_left_x
+    def boxes_for(layout: TextLayout) -> list[tuple[int, int, int, int]]:
+        return [
+            text_box(draw, (layout.left_x, layout.five_y), left_texts[0], font, stroke_width=stroke_width),
+            text_box(draw, (layout.percent_x, layout.five_y), percent_texts[0], font, stroke_width=stroke_width),
+            text_box(
+                draw,
+                (right_text_x(draw, layout.reset_right_x, reset_texts[0], font, stroke_width=stroke_width), layout.five_y),
+                reset_texts[0],
+                font,
+                stroke_width=stroke_width,
+            ),
+            text_box(draw, (layout.left_x, layout.week_y), left_texts[1], font, stroke_width=stroke_width),
+            text_box(draw, (layout.percent_x, layout.week_y), percent_texts[1], font, stroke_width=stroke_width),
+            text_box(
+                draw,
+                (right_text_x(draw, layout.reset_right_x, reset_texts[1], font, stroke_width=stroke_width), layout.week_y),
+                reset_texts[1],
+                font,
+                stroke_width=stroke_width,
+            ),
+        ]
+
+    def visual_center_x(boxes: list[tuple[int, int, int, int]]) -> float:
+        weighted_sum = 0.0
+        total_weight = 0.0
+        for left, top, right, bottom in boxes:
+            weight = max(1, right - left) * max(1, bottom - top)
+            weighted_sum += ((left + right) / 2) * weight
+            total_weight += weight
+        return weighted_sum / total_weight
+
+    def valid(layout: TextLayout) -> bool:
+        boxes = boxes_for(layout)
+        if any(
+            box[0] < edge_margin
+            or box[1] < text_area_top
+            or box[2] > WIDTH - edge_margin
+            or box[3] > text_area_bottom
+            for box in boxes
+        ):
+            return False
+
+        five_left, five_percent, five_reset, week_left, week_percent, week_reset = boxes
+        five_row_ok = five_left[2] + safe_gap <= five_percent[0] and five_percent[2] + safe_gap <= five_reset[0]
+        week_row_ok = week_left[2] + safe_gap <= week_percent[0] and week_percent[2] + safe_gap <= week_reset[0]
+        row_ok = max(five_left[3], five_percent[3], five_reset[3]) + safe_gap <= min(
+            week_left[1], week_percent[1], week_reset[1]
         )
+        center_ok = abs(visual_center_x(boxes) - WIDTH / 2) <= center_slack
+        return five_row_ok and week_row_ok and row_ok and center_ok
 
-    for _ in range(200):
-        left_x = 10 + random.randint(-10, 10)
-        percent_x = 43 + random.randint(-10, 10)
-        reset_right_x = 198 + random.randint(-10, 10)
-        if valid(left_x, percent_x, reset_right_x):
-            return left_x, percent_x, reset_right_x
+    max_five_y = text_area_bottom - five_height - safe_gap - week_height
+    for _ in range(5000):
+        gap_1 = random.randint(8, 28)
+        gap_2 = random.randint(8, 28)
+        group_width = left_width + gap_1 + percent_width + gap_2 + reset_width
+        available_width = WIDTH - edge_margin * 2
+        if group_width > available_width:
+            continue
+
+        percent_x = int(round(WIDTH / 2 - percent_width / 2 + random.randint(-6, 6)))
+        left_x = percent_x - gap_1 - left_width
+        reset_right_x = percent_x + percent_width + gap_2 + reset_width
+
+        if max_five_y < text_area_top:
+            five_y = text_area_top
+            week_y = min(text_area_bottom - week_height, five_y + five_height + safe_gap)
+        else:
+            five_y = random.randint(text_area_top, max_five_y)
+            week_y = random.randint(five_y + five_height + safe_gap, text_area_bottom - week_height)
+
+        layout = TextLayout(left_x, percent_x, reset_right_x, five_y, week_y)
+        shift_x = int(round(WIDTH / 2 - visual_center_x(boxes_for(layout))))
+        layout = TextLayout(
+            layout.left_x + shift_x,
+            layout.percent_x + shift_x,
+            layout.reset_right_x + shift_x,
+            layout.five_y,
+            layout.week_y,
+        )
+        if valid(layout):
+            return layout
 
     # Fallback for unusually wide labels: keep the columns safely separated.
-    return 10, 43, 198
+    group_width = left_width + safe_gap + percent_width + safe_gap + reset_width
+    left_x = max(edge_margin, int(round((WIDTH - group_width) / 2)))
+    percent_x = left_x + left_width + safe_gap
+    reset_right_x = percent_x + percent_width + safe_gap + reset_width
+    fallback = TextLayout(left_x, percent_x, reset_right_x, text_area_top, text_area_top + five_height + safe_gap)
+    if valid(fallback):
+        return fallback
+    raise RuntimeError("Cannot place usage text without overlap")
 
 
 def render_usage_image(snapshot: UsageSnapshot, color_mode: str, bold: bool) -> Image.Image:
@@ -396,8 +569,8 @@ def render_usage_image(snapshot: UsageSnapshot, color_mode: str, bold: bool) -> 
 
     frame = (2, 2, 209, 40)
     frame_inner = (7, 7, 204, 36)
-    five_bar = (9, 9, 204, 20)
-    week_bar = (9, 24, 204, 34)
+    five_bar = (9, 9, 202, 20)
+    week_bar = (9, 24, 202, 34)
 
     draw_dithered_rect(draw, frame)
     draw.rectangle(frame_inner, fill=WHITE)
@@ -412,7 +585,7 @@ def render_usage_image(snapshot: UsageSnapshot, color_mode: str, bold: bool) -> 
     five_percent = f"{round(snapshot.five_hour.percent):d}%"
     week_percent = f"{round(snapshot.week.percent):d}%"
     text_stroke = 1 if bold else 0
-    left_x, percent_x, reset_right_x = choose_text_columns(
+    layout = choose_text_layout(
         draw,
         font,
         [snapshot.five_hour.label, snapshot.week.label],
@@ -421,13 +594,13 @@ def render_usage_image(snapshot: UsageSnapshot, color_mode: str, bold: bool) -> 
         stroke_width=text_stroke,
     )
 
-    draw_text(draw, (left_x, 48), snapshot.five_hour.label, font, five_color, stroke_width=text_stroke)
-    draw_text(draw, (percent_x, 48), five_percent, font, five_color, stroke_width=text_stroke)
-    draw_right(draw, reset_right_x, 48, snapshot.five_hour.reset, font, five_color, stroke_width=text_stroke)
+    draw_text(draw, (layout.left_x, layout.five_y), snapshot.five_hour.label, font, five_color, stroke_width=text_stroke)
+    draw_text(draw, (layout.percent_x, layout.five_y), five_percent, font, five_color, stroke_width=text_stroke)
+    draw_right(draw, layout.reset_right_x, layout.five_y, snapshot.five_hour.reset, font, five_color, stroke_width=text_stroke)
 
-    draw_text(draw, (left_x, 82), snapshot.week.label, font, BLACK, stroke_width=text_stroke)
-    draw_text(draw, (percent_x, 82), week_percent, font, BLACK, stroke_width=text_stroke)
-    draw_right(draw, reset_right_x, 82, snapshot.week.reset, font, BLACK, stroke_width=text_stroke)
+    draw_text(draw, (layout.left_x, layout.week_y), snapshot.week.label, font, BLACK, stroke_width=text_stroke)
+    draw_text(draw, (layout.percent_x, layout.week_y), week_percent, font, BLACK, stroke_width=text_stroke)
+    draw_right(draw, layout.reset_right_x, layout.week_y, snapshot.week.reset, font, BLACK, stroke_width=text_stroke)
 
     return image
 
@@ -641,9 +814,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--color-mode", choices=["bwr", "bw"], default="bwr", help="display/output color mode: bwr uses red, bw is black/white only")
     parser.add_argument("--bold", action="store_true", help="render the two text rows in bold")
     parser.add_argument("--no-clear", action="store_true", help="do not prepend the clear-to-white command")
-    parser.add_argument("--five-hour-percent", default="", help="5h usage percent, e.g. 50 or 50%")
+    parser.add_argument("--five-hour-percent", default="", help="5h usage percent, e.g. 50 or 50%%")
     parser.add_argument("--five-hour-reset", default="", help="5h reset label, e.g. 14:00")
-    parser.add_argument("--week-percent", default="", help="1wk usage percent, e.g. 90 or 90%")
+    parser.add_argument("--week-percent", default="", help="1wk usage percent, e.g. 90 or 90%%")
     parser.add_argument("--week-reset", default="", help="1wk reset label, e.g. Jun 08")
     parser.add_argument("--api-url", default=DEFAULT_USAGE_API_URL, help="Codex usage API endpoint")
     parser.add_argument("--api-token", default="", help="override API bearer token; otherwise uses CODEX_USAGE_TOKEN or ~/.codex/auth.json")
@@ -651,6 +824,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--codex-home", default=str(DEFAULT_CODEX_HOME), help="Codex home containing auth.json")
     parser.add_argument("--upload", action="store_true", help="upload the generated payload to the BLE e-paper tag")
     parser.add_argument("--force-update", action="store_true", help="upload even if the displayed usage state has not changed since the last successful upload")
+    parser.add_argument("--skip-full-cache", action="store_true", help="when uploading, also skip if previous/current 5h are both 100%% and 1wk is unchanged")
     parser.add_argument("--upload-state-file", default=str(DEFAULT_UPLOAD_STATE_PATH), help="file used to remember the last successfully uploaded usage state")
     parser.add_argument("--ble-name", action="append", default=BLE_DEVICE_NAMES, help="allowed BLE device name; can be repeated")
     parser.add_argument("--ble-service-uuid", default=BLE_SERVICE_UUID, help="BLE GATT service UUID")
@@ -662,7 +836,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    snapshot = get_usage(args)
+    try:
+        snapshot = get_usage(args)
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
     image = render_usage_image(snapshot, args.color_mode, args.bold)
     payload = build_payload(image, args.color_mode, clear_first=not args.no_clear)
 
@@ -686,6 +865,16 @@ def main() -> None:
         previous_state = read_upload_state(state_path)
         if previous_state == current_state and not args.force_update:
             print(f"skipping upload: unchanged since last successful upload ({upload_state_summary(current_state)})")
+            return
+        if (
+            args.skip_full_cache
+            and not args.force_update
+            and upload_state_can_skip_full_five_hour(previous_state, current_state)
+        ):
+            print(
+                "skipping upload: unchanged 1wk with previous/current 5h both 100% "
+                f"({upload_state_summary(current_state)})"
+            )
             return
         if previous_state == current_state and args.force_update:
             print("force-update enabled: uploading unchanged state")

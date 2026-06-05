@@ -120,11 +120,14 @@ Each packet is written with response. The script waits for notification ACKs aft
 
 The script saves the last successfully uploaded display state to `.last_upload_state.json`. If the current 5-hour/1-week percentages, reset labels, and display options are unchanged, `--upload` skips the BLE write.
 
+Use `--skip-full-cache` to further reduce unnecessary refreshes while the 5-hour quota is full. The normal "unchanged display state skips upload" rule is still kept; in addition, if the previous successful upload and the current state are both `100%` for the 5-hour percentage, and the 1-week display state is unchanged, the BLE write is skipped even if the 5-hour reset label changed.
+
 Useful options:
 
 ```powershell
 python update_codex_payload.py --upload --ble-scan-timeout 60000
 python update_codex_payload.py --upload --ble-name "SPP BLE Server"
+python update_codex_payload.py --upload --skip-full-cache
 python update_codex_payload.py --upload --force-update
 ```
 
