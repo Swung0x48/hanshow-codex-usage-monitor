@@ -1,0 +1,3 @@
+# Runtime dependencies for update_codex_payload.py.
+Pillow>=10.0.0
+bleak>=0.22.0
