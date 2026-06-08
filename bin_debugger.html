@@ -143,6 +143,16 @@
       min-width: 88px;
     }
 
+    .toolbar input[type="text"] {
+      width: 190px;
+      height: 32px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0 9px;
+      color: var(--text);
+      background: #fff;
+    }
+
     .toolbar-separator {
       width: 1px;
       height: 28px;
@@ -469,6 +479,7 @@
           <input id="stepRange" type="range" min="0" max="0" value="0">
           <span id="stepCounter" class="step-counter">0 / 0</span>
           <span class="toolbar-separator"></span>
+          <input id="bleNameInput" type="text" placeholder="Ihopeseral_uarttrans" title="BLE device name">
           <button id="connectBleBtn" class="ble" title="请求蓝牙权限并搜索设备">连接设备</button>
           <button id="uploadBleBtn" class="ble primary" title="把当前 image.bin 写入设备">写入设备</button>
           <span id="bleStatus" class="ble-status">蓝牙未连接</span>
@@ -542,7 +553,7 @@
     const HEIGHT = 104;
     const IMAGE_BYTES = (WIDTH * HEIGHT) / 8;
     const CHUNK_BYTES = 200;
-    const BLE_DEVICE_NAMES = ["Ihopeseral_uarttrans", "SPP BLE Server", "Octppus_uarttrans"];
+    const DEFAULT_BLE_DEVICE_NAME = "Ihopeseral_uarttrans";
     const BLE_SERVICE_UUID = "f000fff0-0451-4000-b000-000000000000";
     const BLE_CHARACTERISTIC_UUID = "f000fff1-0451-4000-b000-000000000000";
     const BLE_ACK_TIMEOUT_MS = 10000;
@@ -567,6 +578,7 @@
       playBtn: document.getElementById("playBtn"),
       nextBtn: document.getElementById("nextBtn"),
       lastBtn: document.getElementById("lastBtn"),
+      bleNameInput: document.getElementById("bleNameInput"),
       connectBleBtn: document.getElementById("connectBleBtn"),
       uploadBleBtn: document.getElementById("uploadBleBtn"),
       bleStatus: document.getElementById("bleStatus"),
@@ -1016,8 +1028,9 @@
       setBleStatus("正在请求蓝牙权限...");
 
       try {
+        const bleName = els.bleNameInput.value.trim() || DEFAULT_BLE_DEVICE_NAME;
         const device = await navigator.bluetooth.requestDevice({
-          filters: BLE_DEVICE_NAMES.map((name) => ({ name })),
+          filters: [{ name: bleName }],
           optionalServices: [BLE_SERVICE_UUID],
         });
 
@@ -1025,13 +1038,13 @@
         state.bleDevice.removeEventListener("gattserverdisconnected", onBleDisconnected);
         state.bleDevice.addEventListener("gattserverdisconnected", onBleDisconnected);
 
-        setBleStatus(`正在连接 ${device.name || BLE_DEVICE_NAMES[0]}...`);
+        setBleStatus(`正在连接 ${device.name || bleName}...`);
         state.bleServer = await device.gatt.connect();
         const service = await state.bleServer.getPrimaryService(BLE_SERVICE_UUID);
         state.bleCharacteristic = await service.getCharacteristic(BLE_CHARACTERISTIC_UUID);
         await state.bleCharacteristic.startNotifications();
 
-        setBleStatus(`已连接 ${device.name || BLE_DEVICE_NAMES[0]}`, "connected");
+        setBleStatus(`已连接 ${device.name || bleName}`, "connected");
       } catch (error) {
         state.bleCharacteristic = null;
         setBleStatus(error.message, "error");

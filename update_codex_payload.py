@@ -826,12 +826,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--force-update", action="store_true", help="upload even if the displayed usage state has not changed since the last successful upload")
     parser.add_argument("--skip-full-cache", action="store_true", help="when uploading, also skip if previous/current 5h are both 100%% and 1wk is unchanged")
     parser.add_argument("--upload-state-file", default=str(DEFAULT_UPLOAD_STATE_PATH), help="file used to remember the last successfully uploaded usage state")
-    parser.add_argument("--ble-name", action="append", default=BLE_DEVICE_NAMES, help="allowed BLE device name; can be repeated")
+    parser.add_argument(
+        "--ble-name",
+        action="append",
+        default=None,
+        help=f"allowed BLE device name; can be repeated; defaults to {', '.join(BLE_DEVICE_NAMES)}",
+    )
     parser.add_argument("--ble-service-uuid", default=BLE_SERVICE_UUID, help="BLE GATT service UUID")
     parser.add_argument("--ble-characteristic-uuid", default=BLE_CHARACTERISTIC_UUID, help="BLE GATT characteristic UUID")
     parser.add_argument("--ble-scan-timeout", type=int, default=BLE_SCAN_TIMEOUT_MS, help="BLE scan timeout in milliseconds")
     parser.add_argument("--ble-ack-timeout", type=int, default=BLE_ACK_TIMEOUT_MS, help="BLE ACK timeout in milliseconds")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.ble_name is None:
+        args.ble_name = BLE_DEVICE_NAMES.copy()
+    return args
 
 
 def main() -> None:
